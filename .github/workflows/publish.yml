@@ -1,0 +1,30 @@
+# Публикует релиз из ветки upload/<версия>: собирает установщик из частей,
+# проверяет контрольную сумму, создаёт GitHub Release и удаляет ветку.
+name: publish
+on:
+  push:
+    branches: ['upload/**']
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assemble, verify and publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          cd release
+          if [ ! -f READY ]; then echo "Not all parts uploaded yet"; exit 0; fi
+          VERSION=$(cat VERSION)
+          EXE="TelphinDesktop-Setup-$VERSION.exe"
+          cat $(ls "$EXE".part* | sort) > "$EXE"
+          WANT=$(grep -m1 'sha512:' latest.yml | awk '{print $2}')
+          GOT=$(openssl dgst -sha512 -binary "$EXE" | base64 -w0)
+          if [ "$WANT" != "$GOT" ]; then echo "Checksum mismatch"; exit 1; fi
+          gh release create "v$VERSION" "$EXE" "$EXE.blockmap" latest.yml \
+            --repo "$GITHUB_REPOSITORY" --target main \
+            --title "Telphin Desktop $VERSION" --notes-file NOTES.md
+          git push origin --delete "${GITHUB_REF#refs/heads/}"
